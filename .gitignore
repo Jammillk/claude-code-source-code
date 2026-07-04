@@ -4,4 +4,6 @@ dist/
 
 # Python learning space
 learning/.venv/
+learning/config.json
 __pycache__/
+*.pyc

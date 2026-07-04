@@ -1,0 +1,6 @@
+{
+  "api_key": "请在这里填写你的 DeepSeek API Key",
+  "base_url": "https://api.deepseek.com",
+  "model": "deepseek-chat",
+  "max_tokens": 2048
+}
