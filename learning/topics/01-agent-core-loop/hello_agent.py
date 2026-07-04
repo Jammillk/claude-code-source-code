@@ -115,6 +115,22 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "send_email",
+            "description": "发送邮件给指定的人（模拟发送，不会真的发出）",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "to":      {"type": "string", "description": "收件人邮箱"},
+                    "subject": {"type": "string", "description": "邮件主题"},
+                    "body":    {"type": "string", "description": "邮件正文"},
+                },
+                "required": ["to", "subject", "body"],
+            },
+        },
+    },
 ]
 
 
@@ -150,6 +166,15 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
             return f"错误: 文件不存在: {path}"
         except Exception as e:
             return f"读取错误: {e}"
+
+    elif tool_name == "send_email":
+        # 模拟发送，不会真的发出邮件
+        return (
+            f"邮件已发送！\n"
+            f"  收件人: {tool_input['to']}\n"
+            f"  主题:   {tool_input['subject']}\n"
+            f"  正文:   {tool_input['body'][:100]}..."
+        )
 
     return f"未知工具: {tool_name}"
 
@@ -242,4 +267,5 @@ def run_agent(user_prompt: str, max_turns: int = 10):
 
 if __name__ == "__main__":
     # 👇 改这行 prompt 来测试不同的场景
-    run_agent("现在几点了？然后帮我算一下 123 * 456 是多少。")
+    # run_agent("现在几点了？然后帮我算一下 123 * 456 是多少。")
+    run_agent("帮我写一封email到boss@company.com，明天请假，不干了！然后发给boss")
