@@ -4,8 +4,8 @@ hello_agent.py — 最小化 AI Agent 的 "Hello World"
 这个脚本实现了 Claude Code 最核心的 Agent 循环模式:
 
     User → messages[] → API → response
-      ├─ finish_reason == "tool_calls"? → execute tools → append → loop
-      └─ finish_reason != "tool_calls"  → return
+      ├─ 模型要调工具? → 执行工具 → 结果追加到 messages[] → 循环
+      └─ 模型回答完了   → 输出文本，结束
 
 学习目标:
   1. 理解 Agent 循环的本质：while-true + tool dispatch
@@ -22,25 +22,46 @@ import json
 import os
 from openai import OpenAI
 
-# ──────────────────────────────────────────────────────────────
-# 0. 读取配置
-# ──────────────────────────────────────────────────────────────
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  🔑 API 对接点 ①：读取配置文件                                ║
+# ║                                                              ║
+# ║  你的 API Key 存在 learning/config.json 里                    ║
+# ║  这个文件不会被 git 上传                                     ║
+# ╚══════════════════════════════════════════════════════════════╝
 
 def load_config():
-    config_path = os.path.join(os.path.dirname(__file__), '..', 'config.json')
+    config_path = os.path.join(os.path.dirname(__file__), "..", "..", "config.json")
     if not os.path.exists(config_path):
-        print("❌ 未找到 config.json，请按以下步骤操作：")
-        print("   1. 复制 config.template.json → config.json")
-        print("   2. 在 config.json 中填入你的 DeepSeek API Key")
+        print("❌ 未找到 config.json")
+        print("   请: 复制 config.template.json → config.json，填入你的 API Key")
         exit(1)
-    with open(config_path, 'r', encoding='utf-8') as f:
+    with open(config_path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 CONFIG = load_config()
 
+
+# ╔══════════════════════════════════════════════════════════════╗
+# ║  🔑 API 对接点 ②：创建客户端                                  ║
+# ║                                                              ║
+# ║  api_key  —— 从 config.json 读取，就是你申请的 sk-xxxx       ║
+# ║  base_url —— DeepSeek 的 API 地址                            ║
+# ║                                                              ║
+# ║  这个 client 就是你和 AI 之间的"电话线"                       ║
+# ╚══════════════════════════════════════════════════════════════╝
+
+client = OpenAI(
+    api_key=CONFIG["api_key"],
+    base_url=CONFIG.get("base_url", "https://api.deepseek.com"),
+)
+
+print(f"📡 已连接: {CONFIG['base_url']}")
+print(f"🧠 模型:   {CONFIG.get('model', 'deepseek-chat')}")
+
+
 # ──────────────────────────────────────────────────────────────
-# 1. 工具定义 — 这是 Agent 的"手"
-#    OpenAI 格式: 每个工具包在 {"type": "function", "function": {...}} 里
+# 1. 工具定义 — Agent 的"双手"，告诉模型它能做什么
+#    OpenAI/DeepSeek 要求用 {"type":"function","function":{...}} 格式
 # ──────────────────────────────────────────────────────────────
 
 TOOLS = [
@@ -54,12 +75,11 @@ TOOLS = [
                 "properties": {
                     "timezone": {
                         "type": "string",
-                        "description": "时区，默认 Asia/Shanghai"
+                        "description": "时区，比如 Asia/Shanghai",
                     }
                 },
-                "required": []
-            }
-        }
+            },
+        },
     },
     {
         "type": "function",
@@ -71,12 +91,12 @@ TOOLS = [
                 "properties": {
                     "expression": {
                         "type": "string",
-                        "description": "数学表达式，如 '2 + 3 * 4'"
+                        "description": "数学表达式，如 '2 + 3 * 4'",
                     }
                 },
-                "required": ["expression"]
-            }
-        }
+                "required": ["expression"],
+            },
+        },
     },
     {
         "type": "function",
@@ -88,21 +108,21 @@ TOOLS = [
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "要读取的文件路径"
+                        "description": "要读取的文件路径",
                     }
                 },
-                "required": ["path"]
-            }
-        }
-    }
+                "required": ["path"],
+            },
+        },
+    },
 ]
 
+
 # ──────────────────────────────────────────────────────────────
-# 2. 工具执行 — 把 tool_call 变成 tool_result
+# 2. 工具执行 — 模型说"我要调这个工具"，代码就执行它
 # ──────────────────────────────────────────────────────────────
 
 def execute_tool(tool_name: str, tool_input: dict) -> str:
-    """工具分发——对应 Claude Code 中 Tool.call() 的简化版"""
     import datetime
 
     if tool_name == "get_current_time":
@@ -114,17 +134,16 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
         expr = tool_input["expression"]
         try:
             import re
-            if not re.match(r'^[\d\s+\-*/().]+$', expr):
-                return f"错误: 表达式包含不允许的字符: {expr}"
-            result = eval(expr)
-            return f"计算结果: {expr} = {result}"
+            if not re.match(r"^[\d\s+\-*/().]+$", expr):
+                return f"错误: 非法表达式: {expr}"
+            return f"计算结果: {expr} = {eval(expr)}"
         except Exception as e:
             return f"计算错误: {e}"
 
     elif tool_name == "read_file":
         path = tool_input["path"]
         try:
-            with open(path, 'r', encoding='utf-8') as f:
+            with open(path, "r", encoding="utf-8") as f:
                 content = f.read()
             return f"文件内容 ({path}):\n{content[:2000]}"
         except FileNotFoundError:
@@ -135,42 +154,35 @@ def execute_tool(tool_name: str, tool_input: dict) -> str:
     return f"未知工具: {tool_name}"
 
 
-# ──────────────────────────────────────────────────────────────
-# 3. Agent 核心循环 — 阅读这段代码，理解每一步的作用
-# ──────────────────────────────────────────────────────────────
+# ╔══════════════════════════════════════════════════════════════╗
+# ║                                                              ║
+# ║  3. Agent 核心循环 —— 这就是整个 Agent 的"心脏"              ║
+# ║                                                              ║
+# ║  对应 Claude Code 源码中的 src/query.ts (785KB)              ║
+# ║  这里只保留最核心的 ~30 行逻辑                                ║
+# ║                                                              ║
+# ╚══════════════════════════════════════════════════════════════╝
 
 def run_agent(user_prompt: str, max_turns: int = 10):
-    """
-    Agent 主循环 — 对应 Claude Code 的 src/query.ts
 
-    这就是整个 Agent 框架最核心的部分。
-    Claude Code 在此基础上加了 50 万行生产代码。
-    """
-
-    client = OpenAI(
-        api_key=CONFIG["api_key"],
-        base_url=CONFIG.get("base_url", "https://api.deepseek.com"),
-    )
-
-    # Agent 的"记忆" — 对应 query.ts 中的 messages[]
-    # 初始包含 system prompt 和用户输入
+    # messages[] — Agent 的"记忆"，所有对话历史都存在这里
     messages = [
-        {
-            "role": "system",
-            "content": "你是一个有用的助手。你可以使用工具来回答问题。回答使用中文。"
-        },
-        {
-            "role": "user",
-            "content": user_prompt
-        }
+        {"role": "system", "content": "你是一个有用的助手。使用中文回答。"},
+        {"role": "user", "content": user_prompt},
     ]
 
-    print(f"🤖 Agent 启动 (模型: {CONFIG.get('model', 'deepseek-chat')})")
+    print(f"\n{'='*60}")
     print(f"📝 用户: {user_prompt}")
-    print("-" * 50)
+    print(f"{'='*60}")
 
     for turn in range(max_turns):
-        # ── Step A: 发送请求 ──
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        # 🔑 API 对接点 ③：真正发起调用！                    ║
+        #                                                    ║
+        #  把 messages[] (对话历史) + tools (可用工具)       ║
+        #  一起发给 DeepSeek 服务器                          ║
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
         response = client.chat.completions.create(
             model=CONFIG.get("model", "deepseek-chat"),
             max_tokens=CONFIG.get("max_tokens", 2048),
@@ -178,56 +190,56 @@ def run_agent(user_prompt: str, max_turns: int = 10):
             tools=TOOLS,
         )
 
-        choice = response.choices[0]
-        msg = choice.message
-        finish_reason = choice.finish_reason
-        print(f"  [turn={turn}] finish_reason={finish_reason}")
+        msg = response.choices[0].message
+        finish_reason = response.choices[0].finish_reason
 
-        # ── Step B: 处理文本输出 ──
+        print(f"\n  [第 {turn} 轮] 模型状态: {finish_reason}")
+
+        # ── 情况 A：模型返回了文字，打印出来 ──
         if msg.content:
-            print(f"🤖 Agent: {msg.content}")
+            print(f"  🤖 AI 回答: {msg.content}")
 
-        # ── Step C: 处理工具调用 ──
+        # ── 情况 B：模型想调工具了 ──
         if finish_reason == "tool_calls":
-            # 将 assistant 消息追加到 messages[]（包含 tool_calls）
+            # 先把 assistant 整条消息记到 messages[] 里
             messages.append(msg.model_dump(exclude_none=True))
 
-            # 逐个执行工具，结果追加到 messages[]
             for tc in msg.tool_calls:
-                tool_name = tc.function.name
-                tool_input = json.loads(tc.function.arguments)
+                name = tc.function.name
+                args = json.loads(tc.function.arguments)
 
-                print(f"🔧 调用工具: {tool_name}({json.dumps(tool_input, ensure_ascii=False)})")
+                print(f"  🔧 调工具: {name}({json.dumps(args, ensure_ascii=False)})")
 
-                result = execute_tool(tool_name, tool_input)
-                print(f"📋 工具结果: {result[:200]}")
+                result = execute_tool(name, args)
+                print(f"  📋 结果:   {result[:150]}")
 
-                # 每个工具结果是一条独立的 tool 消息
+                # 工具结果也追加到 messages[]，模型下一轮能看到
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
                     "content": result,
                 })
-
-            # ── 循环回到 Step A，让模型处理 tool 结果 ──
+            # 继续循环，模型会根据工具结果再回答
 
         elif finish_reason == "stop":
-            break  # 模型完成回答
-
+            # 模型认为任务完成了
+            break
         else:
-            print(f"  ⚠️ 未知 finish_reason: {finish_reason}, 停止")
+            print(f"  ⚠️ 意外的状态: {finish_reason}")
             break
 
     else:
-        print(f"⚠️  达到最大轮次 ({max_turns})，Agent 停止")
+        print(f"\n  ⚠️ 达到最大轮次 ({max_turns})")
 
-    print("-" * 50)
-    print("✅ Agent 会话结束")
+    print(f"{'='*60}")
+    print("✅ 会话结束")
+    print(f"  messages[] 共 {len(messages)} 条消息")
 
 
 # ──────────────────────────────────────────────────────────────
-# 4. 运行
+# 4. 运行入口
 # ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    # 👇 改这行 prompt 来测试不同的场景
     run_agent("现在几点了？然后帮我算一下 123 * 456 是多少。")
